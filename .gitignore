@@ -1,0 +1,12 @@
+# ignore ALL files in ANY directory named temp
+internal/
+venv/
+__pycache__/
+.vscode/
+neural_nets/saved_models/
+neural_nets/saved_models_old/
+dataset/preamp/27dB/random/venv/
+.vscode/
+__pycache__/
+neural_nets/saved_models/
+neural_nets/saved_models_old/
