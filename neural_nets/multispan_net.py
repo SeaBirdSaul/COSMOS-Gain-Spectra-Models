@@ -29,7 +29,60 @@ parser.add_argument("--skip-training", action="store_true")
 parser.add_argument("--full-output", action="store_true", help="Include input/output spectra in prediction output")
 parser.add_argument("--ripple", action="store_true", help="Load gain spectra as ripple around the active gain mean")
 args = parser.parse_args()
+# ==== Multi Stage Generator Class ====
+class MultiStageGenerator(keras.utils.Sequence):
+    def __init__(self, X, Y, stages, masks, stage_names, batch_size=64):
+        self.X = X
+        self.Y = Y
+        self.stages = stages
+        self.masks = masks
+        self.stage_names = stage_names
+        self.batch_size = batch_size
+        self.indices = np.arange(len(X))
 
+    def __len__(self):
+        return max(1, len(self.X) // self.batch_size)
+
+    def __getitem__(self, idx):
+        batch_idx = self.indices[idx * self.batch_size:(idx + 1) * self.batch_size]
+        Xb = self.X[batch_idx]
+        Yb = self.Y[batch_idx]
+        stages_b = self.stages[batch_idx]
+        masks_b = self.masks[batch_idx]
+
+        targets = {}
+        sw = {}
+        zero = np.zeros((len(Yb), 95), dtype=np.float32)
+        for s in self.stage_names:
+            targets[s] = zero.copy()
+            sw[s] = np.zeros_like(masks_b, dtype=np.float32)
+
+        for i, s in enumerate(stages_b):
+            targets[s][i] = Yb[i]
+            sw[s][i] = masks_b[i]
+
+        return Xb, targets, sw
+    
+    def on_epoch_end(self):
+        np.random.shuffle(self.indices)
+
+# ==== Building a multitasking model
+def build_multitask_model(input_dim, stage_names):
+    inputs = layers.Input(shape=(input_dim,))
+    x = layers.Dense(512, activation='relu')(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.2)(x)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.2)(x)
+    shared = layers.Dense(128, activation='relu', name='shared')(x)
+    outputs = {
+        name: layers.Dense(95, activation='linear', name=name)(
+            layers.Dense(32, activation='relu', name=f'{name}_head')(shared)
+            ) for name in stage_names
+    }
+    return models.Model(inputs=inputs, outputs=outputs)
+                
 # ==== Load dataset ====
 def load_dataset(path):
     if os.path.isfile(path) and path.endswith('.json'):
@@ -89,8 +142,10 @@ def prepare_features(df, roadm_categories=None):
     target_col = 'ripple_spectra' if args.ripple and 'ripple_spectra' in df.columns else 'gain_spectra'
     Y_raw = np.stack(list(df[target_col].values))
     Y = np.nan_to_num(Y_raw, nan=0.0)
-    
-    return X, Y, roadm_categories, X_mask
+
+    stages = df['roadm'].astype(str).values
+
+    return X, Y, roadm_categories, X_mask, stages
 
 
 # ==== Custom loss functions ====
@@ -137,7 +192,7 @@ def combined_loss(Y_true, Y_pred, sample_weight=None):
 def train_model(train):
     print(f"Loading training data from {train}")
     df = load_dataset(train)
-    X, Y, roadm_categories, X_mask = prepare_features(df)
+    X, Y, roadm_categories, X_mask, stages = prepare_features(df)
 
     print(f"Features: {X.shape[1]} (spectra: 95, mask: 95, pin: 1, target_gain: 1, target_power: 1, voa: 1, roadm: {len(roadm_categories)})")
     print(f"ROADM categories: {roadm_categories}")
@@ -156,6 +211,8 @@ def train_model(train):
         Y_train, Y_test = Y[train_mask], Y[test_mask]
         X_mask_train = X_mask_for_loss[train_mask]
         X_mask_test = X_mask_for_loss[test_mask]
+        stages_train = stages[train_mask]
+        stages_test = stages[test_mask]
     else:
         print("Warning: Single file, falling back to random shuffle split.")
         indices = np.arange(len(X_scaled))
@@ -164,26 +221,21 @@ def train_model(train):
         Y_train, Y_test = Y[idx_train], Y[idx_test]
         X_mask_train = X_mask_for_loss[idx_train]
         X_mask_test = X_mask_for_loss[idx_test]
+        stages_train = stages[idx_train]
+        stages_test = stages[idx_test]
 
     print(f"\nTrain/Test Split: {len(X_train)} train, {len(X_test)} test.")
 
-    # ==== Build the model ====
+    # ==== Build multi task model ====
     output_dim = Y.shape[1]
     input_dim = X_train.shape[1]
-    model = models.Sequential([
-        layers.Input(shape=(input_dim,)),
-        layers.Dense(512, activation='relu'),
-        layers.BatchNormalization(),
-        layers.Dropout(0.2),
-        layers.Dense(256, activation='relu'),
-        layers.BatchNormalization(),
-        layers.Dropout(0.2),
-        layers.Dense(128, activation='relu'),
-        layers.Dense(output_dim, activation='linear')
-    ])
-
+    model = build_multitask_model(input_dim, roadm_categories)
     print("Model building complete.")
-    model.compile(optimizer='adam', loss=combined_loss)
+    model.compile(
+        optimizer='adam', 
+        loss={name: combined_loss for name in roadm_categories},
+        loss_weights={name: 1.0 for name in roadm_categories},
+    )
 
     # ==== Train the model ====
     early_stopping = EarlyStopping(
@@ -200,13 +252,22 @@ def train_model(train):
         verbose=1
     )
 
+    # Further split training into train/val
+    idx_tr,idx_val = train_test_split(np.arange(len(X_train)), test_size=0.2, random_state=42)
+    X_train_f, X_val = X_train[idx_tr], X_train[idx_val]
+    Y_train_f, Y_val = Y_train[idx_tr], Y_train[idx_val]
+    X_mask_train_f, X_mask_val = X_mask_train[idx_tr], X_mask_train[idx_val]
+    X_mask_val = X_mask_train[idx_val]
+    stages_train_f, stages_val = stages_train[idx_tr], stages_train[idx_val]
+
+    # ==== Create Generators ====
+    train_gen = MultiStageGenerator(X_train_f, Y_train_f, stages_train_f, X_mask_train_f, roadm_categories)
+    val_gen = MultiStageGenerator(X_val, Y_val, stages_val, X_mask_val, roadm_categories)
+
     history = model.fit(
-        X_train,
-        Y_train,
-        sample_weight = X_mask_train,
-        validation_split=0.2,
+        train_gen,
+        validation_data=val_gen,
         epochs=200,
-        batch_size=64,
         callbacks=[early_stopping, reduce_lr],
         verbose=1
     )
@@ -214,7 +275,11 @@ def train_model(train):
     print("Model training complete.")
 
     # ==== Evaluate the model ====
-    Y_pred = model.predict(X_test, verbose=0)
+    preds = model.predict(X_test, verbose=0)
+    Y_pred = np.zeros_like(Y_test)
+    for i, s in enumerate(stages_test):
+        Y_pred[i] = preds[s][i]
+
     Y_pred_masked = Y_pred * X_mask_test
     Y_test_masked = Y_test * X_mask_test
 
@@ -252,7 +317,7 @@ def train_model(train):
 # ==== Load saved models ====
 def load_saved_model():
     """Load the saved model and scaler"""
-    model = models.load_model(MODEL_PATH)
+    model = models.load_model(MODEL_PATH, custom_objects={'combined_loss': combined_loss, 'gradient_loss': gradient_loss, "cosine_shape_loss": cosine_shape_loss})
     with open(SCALER_PATH, "rb") as f:
         scaler = pickle.load(f)
     with open(METADATA_PATH, "r") as f:
@@ -274,10 +339,13 @@ def predict(path, full_output=False):
 
     # rebuild the same feature matrix as training
     roadm_categories = metadata.get("roadm_categories")
-    X, Y_true, _, X_mask = prepare_features(df, roadm_categories=roadm_categories)
+    X, Y_true, _, X_mask, stages = prepare_features(df, roadm_categories=roadm_categories)
     X_scaled = scaler.transform(X) 
 
-    Y_pred = model.predict(X_scaled, verbose=0)
+    preds = model.predict(X_scaled, verbose=0)
+    Y_pred = np.zeros((len(X_scaled), 95))
+    for i, s in enumerate(stages):
+        Y_pred[i] = preds[s][i]
 
     pred_cols = [f"pred_gain_ch{i+1}" for i in range(Y_pred.shape[1])]
     true_cols = [f"true_gain_ch{i+1}" for i in range(Y_true.shape[1])]
