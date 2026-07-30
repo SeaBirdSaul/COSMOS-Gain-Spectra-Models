@@ -24,7 +24,7 @@ def load_data(roadm_filter=None, channel=None):
     abs_error = np.abs(error)
     pin_total = np.array([d["pin_total"] for d in data])
     roadms = np.array([d["roadm"] for d in data])
-    unique_types = sorted(set(roadms))
+    unique_types = sorted(set(roadms), key=_roadm_sort_key)
     masks = []
     for d in data:
         mask = d.get("mask")
@@ -77,6 +77,10 @@ def _active_ripple(values, mask=None):
     if active.size == 0:
         return np.zeros_like(values, dtype=np.float64)
     return values - np.mean(active)
+
+def _roadm_sort_key(r):
+    _, num, typ = r.split("_")
+    return (int(num), {"preamp": 0, "booster": 1}.get(typ, 2))
 
 # 1. Predicted vs True Gain Spectral (one sample per channel type)
 def plot_predicted_vs_true_gain(d):
@@ -138,7 +142,7 @@ def plot_error_heatmap(d):
     else:
         fig.suptitle("Prediction Error Heatmap (pred - true)", fontsize=14, fontweight="bold") 
         if d["roadm_filter"] == "all" or isinstance(d["roadm_filter"], list):
-            order = np.argsort(d["roadms"])
+            order = sorted(range(len(d["roadms"])), key=lambda i: _roadm_sort_key(d["roadms"][i]))
             error_sorted = d["error"][order]
             ch_sorted = d["roadms"][order]
         else:
