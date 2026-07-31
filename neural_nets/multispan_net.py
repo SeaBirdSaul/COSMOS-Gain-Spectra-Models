@@ -31,17 +31,17 @@ parser.add_argument("--ripple", action="store_true", help="Load gain spectra as 
 args = parser.parse_args()
 # ==== Multi Stage Generator Class ====
 class MultiStageGenerator(keras.utils.Sequence):
-    def __init__(self, X, Y, stages, masks, stage_names, batch_size=64):
+    def __init__(self, X, Y, stages, masks, stage_names, batch_size=64, indices=None):
         self.X = X
         self.Y = Y
         self.stages = stages
         self.masks = masks
         self.stage_names = stage_names
         self.batch_size = batch_size
-        self.indices = np.arange(len(X))
+        self.indices = indices if indices is not None else np.arange(len(X))
 
     def __len__(self):
-        return max(1, len(self.X) // self.batch_size)
+        return max(1, len(self.indices) // self.batch_size)
 
     def __getitem__(self, idx):
         batch_idx = self.indices[idx * self.batch_size:(idx + 1) * self.batch_size]
@@ -214,9 +214,11 @@ def train_model(train):
     input_dim = X_train.shape[1]
     model = build_multitask_model(input_dim, roadm_categories)
     print("Model building complete.")
+
+    masked_loss = keras.losses.LossFunctionWrapper(fn=combinred_loss, reduction="mean_with_sample_weight")
     model.compile(
         optimizer='adam', 
-        loss={name: combined_loss for name in roadm_categories},
+        loss={name: masked_loss for name in roadm_categories},
         loss_weights={name: 1.0 for name in roadm_categories},
     )
 
@@ -244,7 +246,19 @@ def train_model(train):
     stages_train_f, stages_val = stages_train[idx_tr], stages_train[idx_val]
 
     # ==== Create Generators ====
-    train_gen = MultiStageGenerator(X_train_f, Y_train_f, stages_train_f, X_mask_train_f, roadm_categories)
+    counts = np.array([np.sum(stages_train_f == s) for s in roadm_categories])
+    target = int(counts.max())
+    pool =  []
+    for i, s in enumerate(roadm_categories):
+        idx = np.where(stages_train_f == s)[0]
+        if len(idx) == 0:
+            continue
+        reps = int(np.ceil(target / len(idx)))
+        pool.append(np.title(idx, reps)[:target])
+    balanced = np.concatenate(pool)
+    print(f"Balanced pool : {len(balanced)} rows (was {len(X_train_f)}), {target} per stage")
+
+    train_gen = MultiStageGenerator(X_train_f, Y_train_f, stages_train_f, X_mask_train_f, roadm_categories, indices=balanced)
     val_gen = MultiStageGenerator(X_val, Y_val, stages_val, X_mask_val, roadm_categories)
 
     history = model.fit(
