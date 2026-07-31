@@ -150,43 +150,26 @@ def prepare_features(df, roadm_categories=None):
 
 # ==== Custom loss functions ====
 @keras.saving.register_keras_serializable()
-def gradient_loss(Y_true, Y_pred, mask=None):
+def gradient_loss(Y_true, Y_pred):
     grad_true = Y_true[:, 1:] - Y_true[:, :-1]
     grad_pred = Y_pred[:, 1:] - Y_pred[:, :-1]
-    loss = tf.reduce_mean(tf.square(grad_true - grad_pred), axis=-1)
-    if mask is not None:
-        grad_mask = mask[:, 1:] * mask[:, :-1]
-        loss = loss * tf.reduce_mean(grad_mask, axis=-1)
-    return tf.reduce_mean(loss)
+    mask = tf.cast(Y_true != 0, tf.float32)
+    grad_mask = mask[:, 1:] * mask[:, :-1]
+    loss = tf.square(grad_true - grad_pred) * grad_mask
+    return tf.pad(loss, [[0, 0], [0, 1]])
 
 @keras.saving.register_keras_serializable()
-def cosine_shape_loss(Y_true, Y_pred, mask=None):
-    if mask is not None:
-        Y_true = Y_true * mask
-        Y_pred = Y_pred * mask
+def cosine_shape_loss(Y_true, Y_pred):
     Y_true_n = tf.math.l2_normalize(Y_true, axis=-1)
     Y_pred_n = tf.math.l2_normalize(Y_pred, axis=-1)
-    return 1.0 - tf.reduce_mean(tf.reduce_sum(Y_true_n * Y_pred_n, axis=-1))
+    cos = tf.reduce_sum(Y_true_n * Y_pred_n, axis=-1)
+    loss = 1.0 - cos
+    return tf.repeat(tf.expand_dims(loss, axis=-1), tf.shape(Y_true)[-1], axis=-1)
 
 @keras.saving.register_keras_serializable()
-def combined_loss(Y_true, Y_pred, sample_weight=None):
-    # Derive per-channel mask from sample_weight (shappe: (batch, 95))
-    # sample_weight is 1 for active channels, 0 for inactive channels
-    mask = tf.cast(sample_weight > 0.5, tf.float32) if sample_weight is not None else None
-
-    if mask is not None:
-        Y_true_m = Y_true * mask
-        Y_pred_m = Y_pred * mask
-        active_count = tf.reduce_sum(mask, axis=-1) + 1e-8
-    else:
-        Y_true_m = Y_true
-        Y_pred_m = Y_pred
-        active_count = tf.cast(tf.shape(Y_true)[-1], tf.float32)
-
-    channel_mse = tf.reduce_sum(tf.square(Y_true_m - Y_pred_m), axis=-1) / active_count
-    mse = tf.reduce_mean(channel_mse)
-
-    return mse + 0.3 * gradient_loss(Y_true, Y_pred, mask) + 0.2 * cosine_shape_loss(Y_true, Y_pred, mask) 
+def combined_loss(Y_true, Y_pred):
+    mse = tf.square(Y_true - Y_pred)
+    return mse + 0.3 * gradient_loss(Y_true, Y_pred) + 0.2 * cosine_shape_loss(Y_true, Y_pred) 
 
 # ==== Model training ====
 def train_model(train):
