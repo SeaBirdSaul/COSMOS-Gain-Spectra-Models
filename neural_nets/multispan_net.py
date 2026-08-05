@@ -143,7 +143,7 @@ def prepare_features(df, roadm_categories=None):
     Y_raw = np.stack(list(df[target_col].values))
     Y = np.nan_to_num(Y_raw, nan=0.0)
 
-    stages = df['roadm'].astype(str).values
+    stages = np.asarray(df['roadm'].astype(str).to_numpy(), dtype=str)
 
     return X, Y, roadm_categories, X_mask, stages
 
@@ -188,14 +188,14 @@ def train_model(train):
     unique_files = df['source_file'].unique()
     if len(unique_files) > 1:
         train_files, test_files = train_test_split(unique_files, test_size=0.2, random_state=42)
-        train_mask = df['source_file'].isin(train_files)
-        test_mask = df['source_file'].isin(test_files)
+        train_mask = df['source_file'].isin(train_files).to_numpy()
+        test_mask = df['source_file'].isin(test_files).to_numpy()
         X_train, X_test = X_scaled[train_mask], X_scaled[test_mask]
         Y_train, Y_test = Y[train_mask], Y[test_mask]
         X_mask_train = X_mask_for_loss[train_mask]
         X_mask_test = X_mask_for_loss[test_mask]
-        stages_train = stages[train_mask]
-        stages_test = stages[test_mask]
+        stages_train = np.asarray(stages[train_mask], dtype=str)
+        stages_test = np.asarray(stages[test_mask], dtype=str)
     else:
         print("Warning: Single file, falling back to random shuffle split.")
         indices = np.arange(len(X_scaled))
@@ -204,8 +204,8 @@ def train_model(train):
         Y_train, Y_test = Y[idx_train], Y[idx_test]
         X_mask_train = X_mask_for_loss[idx_train]
         X_mask_test = X_mask_for_loss[idx_test]
-        stages_train = stages[idx_train]
-        stages_test = stages[idx_test]
+        stages_train = np.asarray(stages[idx_train], dtype=str)
+        stages_test = np.asarray(stages[idx_test], dtype=str)
 
     print(f"\nTrain/Test Split: {len(X_train)} train, {len(X_test)} test.")
 
@@ -215,10 +215,9 @@ def train_model(train):
     model = build_multitask_model(input_dim, roadm_categories)
     print("Model building complete.")
 
-    masked_loss = keras.losses.LossFunctionWrapper(fn=combinred_loss, reduction="mean_with_sample_weight")
     model.compile(
         optimizer='adam', 
-        loss={name: masked_loss for name in roadm_categories},
+        loss={name: combined_loss for name in roadm_categories},
         loss_weights={name: 1.0 for name in roadm_categories},
     )
 
@@ -243,7 +242,8 @@ def train_model(train):
     Y_train_f, Y_val = Y_train[idx_tr], Y_train[idx_val]
     X_mask_train_f, X_mask_val = X_mask_train[idx_tr], X_mask_train[idx_val]
     X_mask_val = X_mask_train[idx_val]
-    stages_train_f, stages_val = stages_train[idx_tr], stages_train[idx_val]
+    stages_train_f = np.asarray(stages_train[idx_tr], dtype=str)
+    stages_val = np.asarray(stages_train[idx_val], dtype=str)
 
     # ==== Create Generators ====
     counts = np.array([np.sum(stages_train_f == s) for s in roadm_categories])
@@ -254,7 +254,7 @@ def train_model(train):
         if len(idx) == 0:
             continue
         reps = int(np.ceil(target / len(idx)))
-        pool.append(np.title(idx, reps)[:target])
+        pool.append(np.tile(idx, reps)[:target])
     balanced = np.concatenate(pool)
     print(f"Balanced pool : {len(balanced)} rows (was {len(X_train_f)}), {target} per stage")
 
@@ -262,8 +262,8 @@ def train_model(train):
     val_gen = MultiStageGenerator(X_val, Y_val, stages_val, X_mask_val, roadm_categories)
 
     history = model.fit(
-        train_gen,
-        validation_data=val_gen,
+        train_gen,  # type: ignore[arg-type]
+        validation_data=val_gen,  # type: ignore[arg-type]
         epochs=200,
         callbacks=[early_stopping, reduce_lr],
         verbose=1
