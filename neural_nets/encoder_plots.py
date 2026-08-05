@@ -41,18 +41,25 @@ def plot_prediction_vs_true(data):
     return fig
 
 def plot_error_distribution(data):
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.boxplot(data["abs_errors"].T, patch_artist=True)
-    ax.set_title("Absolute Error Distribution by Channel")
+    channel_mean = data["abs_errors"].mean(axis=0)
+    channel_q25, channel_q75 = np.percentile(data["abs_errors"], [25, 75], axis=0)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(data["channels"], channel_mean, label="Mediam abs errro", color="C0")
+    ax.fill_between(data["channels"], channel_q25, channel_q75, alpha=0.25, label="25-75 percentile")
+    ax.set_title("Channel Error Summary")
     ax.set_xlabel("Channel")
     ax.set_ylabel("Absolute Error (dB)")
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     return fig
 
 def plot_error_vs_power(data):
-    fig, ax = plt.subplots(figsize=(8, 6))
     mae_per_sample = data["abs_errors"].mean(axis=1)
-    ax.scatter(data["pin_total"], mae_per_sample, s=20, alpha=0.6)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(data["pin_total"], mae_per_sample, s=10, alpha=0.6)
+    z = np.polyfit(data["pin_total"], mae_per_sample, 1)
+    ax.plot(data["pin_total"], np.polyval(z, data["pin_total"]), color="red", lw=1)
     ax.set_title("Mean Absolute Error vs Input Power")
     ax.set_xlabel("Input Power (dB)")
     ax.set_ylabel("Mean Absolute Error (dB)")
