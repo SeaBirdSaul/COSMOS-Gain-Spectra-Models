@@ -19,6 +19,42 @@ try:
 except ImportError:
     from helpers import extract_samples_from_multispan_json
 
+@tf.keras.utils.register_keras_serializable(package="Custom", name="MaskedEncoderModel")
+class MaskedEncoderModel(tf.keras.Model):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.masked_mae = tf.keras.metrics.Mean(name="masked_mae")
+
+    @property
+    def metrics(self):
+        return [self.masked_mae]
+
+    def compute_masked_loss(self, y, y_pred, mask):
+        mask = tf.cast(mask, y_pred.dtype)
+        loss = tf.abs(y - y_pred) * mask
+        loss = tf.reduce_sum(loss)
+        mask_sum = tf.reduce_sum(mask)
+        loss = loss / tf.maximum(mask_sum, 1.0)
+        loss += tf.add_n(self.losses) if self.losses else loss * 0.0
+        return loss
+
+    def train_step(self, data):
+        x, y, mask = data
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)
+            loss = self.compute_masked_loss(y, y_pred, mask)
+        grads = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        self.masked_mae.update_state(loss)
+        return {"loss": loss, "masked_mae": self.masked_mae.result()}
+
+    def test_step(self, data):
+        x, y, mask = data
+        y_pred = self(x, training=False)
+        loss = self.compute_masked_loss(y, y_pred, mask)
+        self.masked_mae.update_state(loss)
+        return {"loss": loss, "masked_mae": self.masked_mae.result()}
+
 HERE = Path(__file__).resolve().parent
 MODEL_DIR = HERE / "saved_models" / "encoder"
 MODEL_PATH = MODEL_DIR / "model.keras"
@@ -95,24 +131,39 @@ def prepare_features(df, roadm_categories=None):
     Y_raw = np.stack(df["gain_spectra"].values)
     Y = np.nan_to_num(Y_raw, nan=0.0).astype(np.float32)
 
-    return X, Y, roadm_categories
+    return X, Y, roadm_categories, X_mask.astype(np.float32)
+
+# ==== Opt-in inactive penalty for model ====
+def compute_masked_loss(self, Y, Y_pred, mask):
+    mask = tf.cast(mask, Y_pred.dtypee)
+    loss = tf.abs(Y - Y_pred) * mask
+    loss = tf.reduce_sum(loss)
+    mask_sum = tf.reduce_sum(mask)
+    loss = loss / tf.maximum(mask_sum, 1.0)
+    w = float(getattr(self, "inactive_loss_weight", 0.0))
+    if w > 0.0:
+        inactive = 1.0 - mask
+        loss += w * tf.reduce_sum(tf.abs(Y_pred * inactive)) / tf.maximum(tf.reduce_sum(inactive), 1.0)
+    loss += tf.add_n(self.losses) if self.losses else loss * 0.0
+    return loss
 
 # ==== Model training ====
-def train_model(train_path, epochs=80, batch_size=64, latent_dim=64):
+def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_loss_weight=0.0):
     print(f"Loading training data from {train_path}")
     df = load_dataset(train_path)
     if df.empty:
         raise ValueError("No data found in training set")
-    X, Y, roadm_categories = prepare_features(df)
+    X, Y, roadm_categories, X_mask = prepare_features(df)
 
     print(f"Features: {X.shape[1]} (spectra: 95, mask: 95, pin: 1, target_gain: 1, target_power: 1, voa: 1, roadm: {len(roadm_categories)})")
     print(f"ROADM categories: {roadm_categories}")
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    X_train, X_test, Y_train, Y_test = train_test_split(
+    X_train, X_test, Y_train, Y_test, mask_train, mask_test = train_test_split(
         X_scaled,
         Y,
+        X_mask,
         test_size=0.2,
         random_state=42,
     )
@@ -122,22 +173,27 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64):
         latent_dim=latent_dim,
         output_dim=Y.shape[1],
     )
+    # wrap into subclass so train_step/test_step are used
+    model = MaskedEncoderModel(inputs=model.inputs, outputs=model.outputs, name=model.name)
+    model.inactive_loss_weight = inactive_loss_weight
     print("Model building complete.")
 
-    model.compile(optimizer="adam", loss="mae")
+# compile only optimizer; custom train_step/test_step handle masked loss and metrics
+    model.compile(optimizer="adam")
 
     # ==== Train the model ====
     model.fit(
         X_train,
         Y_train,
+        sample_weight=mask_train,
         validation_split=0.1,
         epochs=epochs,
         batch_size=batch_size,
-        verbose=1
+        verbose=1,
     )
 
     preds = model.predict(X_test, verbose=0)
-    mae = mean_absolute_error(Y_test, preds)
+    mae = float(np.sum(np.abs(Y_test - preds) * mask_test) / np.maximum(np.sum(mask_test), 1.0))
     print(f"Test MAE: {mae:.4f}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -153,6 +209,7 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64):
         "latent_dim": latent_dim,
         "train_samples": int(len(X_train)),
         "test_samples": int(len(X_test)),
+        "inactive_loss_weight": inactive_loss_weight,
     }
     with open(METADATA_PATH, "w") as handle:
         json.dump(metadata, handle, indent=2)
@@ -179,9 +236,10 @@ def predict(path):
     df = load_dataset(path)
 
     # rebuild the same feature matrix as training
-    X, Y_true, roadm_categories = prepare_features(df, roadm_categories=metadata.get("roadm_categories"))
-    X_scaled = scaler.transform(X) 
+    X, Y_true, roadm_categories, X_mask = prepare_features(df, roadm_categories=metadata.get("roadm_categories"))
+    X_scaled = scaler.transform(X)
     preds = model.predict(X_scaled, verbose=0)
+    preds = preds * X_mask
 
     PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -204,6 +262,7 @@ def predict(path):
             "num_active_channels": int(row["num_active_channels"]),
             "roadm": row["roadm"],
             "target_gain": float(row["target_gain"]),
+            "mask": X_mask[idx].tolist(),
             "predicted_gain_spectra": preds[idx].tolist(),
             "true_gain_spectra": Y_true[idx].tolist()
         })
@@ -220,10 +279,11 @@ def main():
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=80)
     parser.add_argument("--latent-dim", type=int, default=80)
+    parser.add_argument("--inactive-loss-weight", type=float, default=0.0, help="Weight to force inactive-channel predictions toward 0 (opt-in, requires retraining)")
     args = parser.parse_args()
 
     if args.train:
-        train_model(args.train, epochs=args.epochs, batch_size=args.batch_size, latent_dim=args.latent_dim)
+        train_model(args.train, epochs=args.epochs, batch_size=args.batch_size, latent_dim=args.latent_dim, inactive_loss_weight=args.inactive_loss_weight)
 
     if args.predict:
         predict(args.predict)

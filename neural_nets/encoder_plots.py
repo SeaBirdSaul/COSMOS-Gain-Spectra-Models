@@ -15,7 +15,11 @@ def load_data():
     channels = np.arange(1, 96)
     Y_pred = np.array([d["predicted_gain_spectra"] for d in data], dtype=float)
     Y_true = np.array([d["true_gain_spectra"] for d in data], dtype=float)
-    error = Y_pred - Y_true
+    if "mask" in data[0]:
+        mask = np.array([d["mask"] for d in data], dtype=float)
+    else:
+        mask = (Y_true != 0).astype(float)
+    error = np.where(mask > 0, Y_pred - Y_true, np.nan)
     abs_error = np.abs(error)
     pin_total = np.array([d["pin_total"] for d in data], dtype=float)
     
@@ -26,6 +30,7 @@ def load_data():
         "error": error,
         "abs_errors": abs_error,
         "pin_total": pin_total,
+        "mask": mask,
     }
 
 def plot_prediction_vs_true(data):
@@ -41,8 +46,8 @@ def plot_prediction_vs_true(data):
     return fig
 
 def plot_error_distribution(data):
-    channel_mean = data["abs_errors"].mean(axis=0)
-    channel_q25, channel_q75 = np.percentile(data["abs_errors"], [25, 75], axis=0)
+    channel_mean = np.nanmean(data["abs_errors"], axis=0)
+    channel_q25, channel_q75 = np.nanpercentile(data["abs_errors"], [25, 75], axis=0)
 
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(data["channels"], channel_mean, label="Mediam abs errro", color="C0")
@@ -55,7 +60,7 @@ def plot_error_distribution(data):
     return fig
 
 def plot_error_vs_power(data):
-    mae_per_sample = data["abs_errors"].mean(axis=1)
+    mae_per_sample = np.nanmean(data["abs_errors"], axis=1)
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(data["pin_total"], mae_per_sample, s=10, alpha=0.6)
     z = np.polyfit(data["pin_total"], mae_per_sample, 1)
