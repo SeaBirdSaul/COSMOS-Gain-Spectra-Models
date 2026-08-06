@@ -54,6 +54,21 @@ class MaskedEncoderModel(tf.keras.Model):
         loss = self.compute_masked_loss(y, y_pred, mask)
         self.masked_mae.update_state(loss)
         return {"loss": loss, "masked_mae": self.masked_mae.result()}
+    
+    # ==== Opt-in inactive penalty for model ====
+    def compute_masked_loss(self, Y, Y_pred, mask):
+        mask = tf.cast(mask, Y_pred.dtype)
+        loss = tf.abs(Y - Y_pred) * mask
+        loss = tf.reduce_sum(loss)
+        mask_sum = tf.reduce_sum(mask)
+        loss = loss / tf.maximum(mask_sum, 1.0)
+        w = float(getattr(self, "inactive_loss_weight", 0.0))
+        if w > 0.0:
+            inactive = 1.0 - mask
+            loss += w * tf.reduce_sum(tf.abs(Y_pred * inactive)) / tf.maximum(tf.reduce_sum(inactive), 1.0)
+        loss += tf.add_n(self.losses) if self.losses else loss * 0.0
+        return loss
+
 
 HERE = Path(__file__).resolve().parent
 MODEL_DIR = HERE / "saved_models" / "encoder"
@@ -76,9 +91,9 @@ def build_encoder_model(input_dim, latent_dim=64, output_dim=95):
     return models.Model(inputs=inputs, outputs=outputs, name="encoder_net")
 
 # ==== Load dataset ====
-def load_dataset(path):
+def load_dataset(path, calculate_ripple=False):
     if os.path.isfile(path) and path.endswith('.json'):
-        samples = extract_samples_from_multispan_json(path, calculate_ripple=False)
+        samples = extract_samples_from_multispan_json(path, calculate_ripple=calculate_ripple)
         return pd.DataFrame(samples)
     if os.path.isdir(path):
         json_files = [str(p) for p in Path(path).rglob("*.json")]
@@ -86,13 +101,13 @@ def load_dataset(path):
             raise FileNotFoundError(f"No JSON files found in {path}")
         all_samples = []
         for file in json_files:
-            all_samples.extend(extract_samples_from_multispan_json(file, calculate_ripple=False))
+            all_samples.extend(extract_samples_from_multispan_json(file, calculate_ripple=calculate_ripple))
         return pd.DataFrame(all_samples)
     raise FileNotFoundError(f"Cannot load dataset from {path}")
 
 
 # ==== Prepare data ====
-def prepare_features(df, roadm_categories=None):
+def prepare_features(df, roadm_categories=None, use_ripple=False):
     df = df.copy()
 
     df['input_spectra'] = df['input_spectra'].apply(lambda x: np.asarray(x, dtype=np.float32))
@@ -128,32 +143,19 @@ def prepare_features(df, roadm_categories=None):
     X = np.hstack([X_spectra_masked, X_mask, scalar_features, roadm_dummies])
     
     # Target Y
-    Y_raw = np.stack(df["gain_spectra"].values)
+    target_col = "ripple_spectra" if use_ripple else "gain_spectra"
+    Y_raw = np.stack(df[target_col].values)
     Y = np.nan_to_num(Y_raw, nan=0.0).astype(np.float32)
 
     return X, Y, roadm_categories, X_mask.astype(np.float32)
 
-# ==== Opt-in inactive penalty for model ====
-def compute_masked_loss(self, Y, Y_pred, mask):
-    mask = tf.cast(mask, Y_pred.dtypee)
-    loss = tf.abs(Y - Y_pred) * mask
-    loss = tf.reduce_sum(loss)
-    mask_sum = tf.reduce_sum(mask)
-    loss = loss / tf.maximum(mask_sum, 1.0)
-    w = float(getattr(self, "inactive_loss_weight", 0.0))
-    if w > 0.0:
-        inactive = 1.0 - mask
-        loss += w * tf.reduce_sum(tf.abs(Y_pred * inactive)) / tf.maximum(tf.reduce_sum(inactive), 1.0)
-    loss += tf.add_n(self.losses) if self.losses else loss * 0.0
-    return loss
-
 # ==== Model training ====
-def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_loss_weight=0.0):
+def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_loss_weight=0.0, ripple=False):
     print(f"Loading training data from {train_path}")
-    df = load_dataset(train_path)
+    df = load_dataset(train_path, calculate_ripple=ripple)
     if df.empty:
         raise ValueError("No data found in training set")
-    X, Y, roadm_categories, X_mask = prepare_features(df)
+    X, Y, roadm_categories, X_mask = prepare_features(df, use_ripple=ripple)
 
     print(f"Features: {X.shape[1]} (spectra: 95, mask: 95, pin: 1, target_gain: 1, target_power: 1, voa: 1, roadm: {len(roadm_categories)})")
     print(f"ROADM categories: {roadm_categories}")
@@ -207,6 +209,7 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
         "output_dim": int(Y.shape[1]),
         "roadm_categories": roadm_categories,
         "latent_dim": latent_dim,
+        "ripple": ripple,
         "train_samples": int(len(X_train)),
         "test_samples": int(len(X_test)),
         "inactive_loss_weight": inactive_loss_weight,
@@ -233,10 +236,11 @@ def predict(path):
     print(f"\nLoading saved model from {MODEL_PATH}")
     model, scaler, metadata = load_saved_model()
     print(f"Loading evaluation data from {path}")
-    df = load_dataset(path)
 
     # rebuild the same feature matrix as training
-    X, Y_true, roadm_categories, X_mask = prepare_features(df, roadm_categories=metadata.get("roadm_categories"))
+    use_ripple = bool(metadata.get("ripple", False))
+    df = load_dataset(path, calculate_ripple=use_ripple)
+    X, Y_true, roadm_categories, X_mask = prepare_features(df, roadm_categories=metadata.get("roadm_categories"), use_ripple=use_ripple)
     X_scaled = scaler.transform(X)
     preds = model.predict(X_scaled, verbose=0)
     preds = preds * X_mask
@@ -262,6 +266,7 @@ def predict(path):
             "num_active_channels": int(row["num_active_channels"]),
             "roadm": row["roadm"],
             "target_gain": float(row["target_gain"]),
+            "target_type": "ripple" if use_ripple else "gain",
             "mask": X_mask[idx].tolist(),
             "predicted_gain_spectra": preds[idx].tolist(),
             "true_gain_spectra": Y_true[idx].tolist()
@@ -280,10 +285,11 @@ def main():
     parser.add_argument("--batch-size", type=int, default=80)
     parser.add_argument("--latent-dim", type=int, default=80)
     parser.add_argument("--inactive-loss-weight", type=float, default=0.0, help="Weight to force inactive-channel predictions toward 0 (opt-in, requires retraining)")
+    parser.add_argument("--ripple", action="store_true", help="Load gain spectra as ripple around the active gain mean")
     args = parser.parse_args()
 
     if args.train:
-        train_model(args.train, epochs=args.epochs, batch_size=args.batch_size, latent_dim=args.latent_dim, inactive_loss_weight=args.inactive_loss_weight)
+        train_model(args.train, epochs=args.epochs, batch_size=args.batch_size, latent_dim=args.latent_dim, inactive_loss_weight=args.inactive_loss_weight, ripple=args.ripple)
 
     if args.predict:
         predict(args.predict)
