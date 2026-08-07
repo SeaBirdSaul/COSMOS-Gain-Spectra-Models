@@ -29,12 +29,17 @@ class MaskedEncoderModel(tf.keras.Model):
     def metrics(self):
         return [self.masked_mae]
 
-    def compute_masked_loss(self, y, y_pred, mask):
-        mask = tf.cast(mask, y_pred.dtype)
-        loss = tf.abs(y - y_pred) * mask
+    # ==== Opt-in inactive penalty for model ====
+    def compute_masked_loss(self, Y, Y_pred, mask):
+        mask = tf.cast(mask, Y_pred.dtype)
+        loss = tf.abs(Y - Y_pred) * mask
         loss = tf.reduce_sum(loss)
         mask_sum = tf.reduce_sum(mask)
         loss = loss / tf.maximum(mask_sum, 1.0)
+        w = float(getattr(self, "inactive_loss_weight", 0.0))
+        if w > 0.0:
+            inactive = 1.0 - mask
+            loss += w * tf.reduce_sum(tf.abs(Y_pred * inactive)) / tf.maximum(tf.reduce_sum(inactive), 1.0)
         loss += tf.add_n(self.losses) if self.losses else loss * 0.0
         return loss
 
@@ -54,21 +59,6 @@ class MaskedEncoderModel(tf.keras.Model):
         loss = self.compute_masked_loss(y, y_pred, mask)
         self.masked_mae.update_state(loss)
         return {"loss": loss, "masked_mae": self.masked_mae.result()}
-    
-    # ==== Opt-in inactive penalty for model ====
-    def compute_masked_loss(self, Y, Y_pred, mask):
-        mask = tf.cast(mask, Y_pred.dtype)
-        loss = tf.abs(Y - Y_pred) * mask
-        loss = tf.reduce_sum(loss)
-        mask_sum = tf.reduce_sum(mask)
-        loss = loss / tf.maximum(mask_sum, 1.0)
-        w = float(getattr(self, "inactive_loss_weight", 0.0))
-        if w > 0.0:
-            inactive = 1.0 - mask
-            loss += w * tf.reduce_sum(tf.abs(Y_pred * inactive)) / tf.maximum(tf.reduce_sum(inactive), 1.0)
-        loss += tf.add_n(self.losses) if self.losses else loss * 0.0
-        return loss
-
 
 HERE = Path(__file__).resolve().parent
 MODEL_DIR = HERE / "saved_models" / "encoder"
