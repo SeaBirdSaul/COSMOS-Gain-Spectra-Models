@@ -271,7 +271,7 @@ def plot_error_vs_power(d):
         ax.legend(fontsize=6)
     else:
         fig.suptitle("Error vs Input Power", fontsize=14, fontweight="bold")
-        mae_per_sample = np.nanmean(d["abs_error"], axis=1)
+        mae_per_sample = np.nansum(d["abs_error"], axis=1) / np.maximum(d["masks"].sum(axis=1), 1)
         for ct in d["unique_types"]:
             mask = d["roadms"] == ct
             ax.scatter(d["pin_total"][mask], mae_per_sample[mask], s=20, alpha=0.6, label=ct)
@@ -291,7 +291,7 @@ def plot_roadm_proficiency(d):
         if d.get("channel_num"):
             vals = d["abs_error"][idx]
         else:
-            vals = np.nanmean(d["abs_error"][idx], axis=1)
+            vals = np.nansum(d["abs_error"][idx], axis=1) / np.maximum(d["masks"][idx].sum(axis=1), 1)
         vals = vals[~np.isnan(vals)]
         means.append(np.mean(vals))
         stds.append(np.std(vals))

@@ -160,6 +160,8 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
         random_state=42,
     )
 
+    _, test_idx = train_test_split(np.arange(len(X_scaled)), test_size=0.2, random_state=42)
+
     model = build_encoder_model(
         input_dim=X_train.shape[1],
         latent_dim=latent_dim,
@@ -189,6 +191,9 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
     print(f"Test MAE: {mae:.4f}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    with open(MODEL_DIR / "test_indices.json", "w") as f:
+        json.dump([int(i) for i in test_idx], f)
+
     model.save(MODEL_PATH)
 
     with open(SCALER_PATH, "wb") as handle:
@@ -204,6 +209,7 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
         "test_samples": int(len(X_test)),
         "inactive_loss_weight": inactive_loss_weight,
     }
+    metadata["train_source"] = str(train_path)
     with open(METADATA_PATH, "w") as handle:
         json.dump(metadata, handle, indent=2)
 
@@ -221,7 +227,7 @@ def load_saved_model():
 
 
 # ==== Predicting using loaded model ====
-def predict(path):
+def predict(path, heldout=False):
     """Run inference on a new CSV file using the saved model."""
     print(f"\nLoading saved model from {MODEL_PATH}")
     model, scaler, metadata = load_saved_model()
@@ -235,6 +241,22 @@ def predict(path):
     preds = model.predict(X_scaled, verbose=0)
     preds = preds * X_mask
 
+    keep = slice(None)
+    if heldout:
+        idx_path = MODEL_DIR / "test_indices.json"
+        if idx_path.exists():
+            keep = np.array(json.load(open(idx_path)), dtype=int)
+        else:
+            n = len(df)
+            if n != int(metadata["train_samples"]) + int(metadata["test_samples"]):
+                raise ValueError("--heldout requires the same topology used for training"
+                "(or a saved test_indices.json)"
+                )
+            _, keep = train_test_split(np.arange(n), test_size=0.2, random_state=42)
+            print("WARNING: reconstructing split from random_state=42; retrain to save test_indices.json")
+        preds, Y_true, X_mask = preds[keep], Y_true[keep], X_mask[keep]
+        df = df.iloc[keep].reset_index(drop=True)
+
     PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
     pred_cols = [f"pred_gain_ch{i+1}" for i in range(preds.shape[1])]
@@ -244,7 +266,8 @@ def predict(path):
     true_df = pd.DataFrame(Y_true, columns=true_cols)
     meta = df[["source_file", "pin_total", "num_active_channels", "roadm", "target_gain"]].reset_index(drop=True)
     output_df = pd.concat([meta, result, true_df], axis=1)
-    output_df.to_csv(PREDICTIONS_DIR / "predictions.csv", index=False)
+    suffix = "_heldout" if heldout else ""
+    output_df.to_csv(PREDICTIONS_DIR / f"predictions{suffix}.csv", index=False)
     print(f"Saved {len(result)} rows")
 
     records = []
@@ -262,9 +285,9 @@ def predict(path):
             "true_gain_spectra": Y_true[idx].tolist()
         })
         
-    with open(PREDICTIONS_DIR / "predictions.json", "w") as f:
+    with open(PREDICTIONS_DIR / f"predictions{suffix}.json", "w") as f:
         json.dump(records, f, indent=2)
-    print(f"Saved {len(records)} records to {PREDICTIONS_DIR / 'predictions.json'}")
+    print(f"Saved {len(records)} records to {PREDICTIONS_DIR / f'predictions{suffix}.json'}")
 
 def main():
     # ==== CLI ====
@@ -276,13 +299,14 @@ def main():
     parser.add_argument("--latent-dim", type=int, default=80)
     parser.add_argument("--inactive-loss-weight", type=float, default=0.0, help="Weight to force inactive-channel predictions toward 0 (opt-in, requires retraining)")
     parser.add_argument("--ripple", action="store_true", help="Load gain spectra as ripple around the active gain mean")
+    parser.add_argument("--heldout", action="store_true", help="Only save predictions for the held-out split")
     args = parser.parse_args()
 
     if args.train:
         train_model(args.train, epochs=args.epochs, batch_size=args.batch_size, latent_dim=args.latent_dim, inactive_loss_weight=args.inactive_loss_weight, ripple=args.ripple)
 
     if args.predict:
-        predict(args.predict)
+        predict(args.predict, heldout=args.heldout)
 
 if __name__ == '__main__':
     main()
