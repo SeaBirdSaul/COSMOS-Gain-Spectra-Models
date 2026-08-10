@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 from tensorflow import keras
 from tensorflow.keras import layers, models
+from collections import Counter
 
 try:
     from .helpers import extract_samples_from_multispan_json
@@ -86,7 +87,7 @@ def load_dataset(path, calculate_ripple=False):
         samples = extract_samples_from_multispan_json(path, calculate_ripple=calculate_ripple)
         return pd.DataFrame(samples)
     if os.path.isdir(path):
-        json_files = [str(p) for p in Path(path).rglob("*.json")]
+        json_files = sorted(str(p) for p in Path(path).rglob("*.json"))
         if not json_files:
             raise FileNotFoundError(f"No JSON files found in {path}")
         all_samples = []
@@ -152,15 +153,27 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    X_train, X_test, Y_train, Y_test, mask_train, mask_test = train_test_split(
+
+    # Stratified split on ROADM / 5 dB pin bin so the low-pin stages land
+    # proportionally in train/test. Sparse bins fall back to roadm-only
+    pins = np.nan_to_num(df["pin_total"].to_numpy(), nan=-60.0)
+    bins = (np.floor(pins / 5.0) * 5.0).astype(int)
+    roadms = df["roadm"].astype(str).to_numpy()
+    labels = np.array([f"{r}|{b}" for r, b in zip(roadms, bins)])
+    cnt = Counter(labels)
+    labels = np.array([l if cnt[l] >= 20 else l.split("|")[0] for l in labels])
+
+    indices = np.arange(len(X_scaled))
+    X_train, X_test, Y_train, Y_test, mask_train, mask_test, _, test_idx = train_test_split(
         X_scaled,
         Y,
         X_mask,
+        indices,
         test_size=0.2,
         random_state=42,
+        stratify=labels,
     )
-
-    _, test_idx = train_test_split(np.arange(len(X_scaled)), test_size=0.2, random_state=42)
+    print("test per roadm:", dict(Counter(roadms[test_idx])))
 
     model = build_encoder_model(
         input_dim=X_train.shape[1],
@@ -194,6 +207,18 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
     with open(MODEL_DIR / "test_indices.json", "w") as f:
         json.dump([int(i) for i in test_idx], f)
 
+    # Per-file held-out indices so --heldout works on a single topology file
+    # After multi-topology training (global test_indices no longer maps 1:1)
+    is_test = np.zeros(len(df), dtype=bool)
+    is_test[test_idx] = True
+    src = df["source_file"].to_numpy()
+    per_file = {}
+    for fname in df["source_file"].unique():
+        f_idx = np.flatnonzero(src == fname)
+        per_file[fname] = [int(i) for i in f_idx[is_test[f_idx]] - f_idx[0]]
+    with open(MODEL_DIR / "test_indices_per_file.json", "w") as f:
+        json.dump(per_file, f, indent=2)
+    
     model.save(MODEL_PATH)
 
     with open(SCALER_PATH, "wb") as handle:
@@ -208,6 +233,9 @@ def train_model(train_path, epochs=80, batch_size=64, latent_dim=64, inactive_lo
         "train_samples": int(len(X_train)),
         "test_samples": int(len(X_test)),
         "inactive_loss_weight": inactive_loss_weight,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "stratified": True,
     }
     metadata["train_source"] = str(train_path)
     with open(METADATA_PATH, "w") as handle:
@@ -244,7 +272,14 @@ def predict(path, heldout=False):
     keep = slice(None)
     if heldout:
         idx_path = MODEL_DIR / "test_indices.json"
-        if idx_path.exists():
+        per_file_path = MODEL_DIR / "test_indices_per_file.json"
+        if per_file_path.exists() and df["source_file"].nunique() == 1:
+            fname = df["source_file"].iloc[0]
+            keep = np.array(json.load(open(per_file_path)).get(fname, []), dtype=int)
+            if keep.size == 0:
+                print("WARNING: file not in training held-out map; keeping all records")
+                keep = slice(None)
+        elif idx_path.exists():
             keep = np.array(json.load(open(idx_path)), dtype=int)
         else:
             n = len(df)
