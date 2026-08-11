@@ -41,10 +41,60 @@ def by_pin(err, m, data, width=1):
         print(f"  pin[{lo:4d},{lo + width:4d}] n={int(m[idx].sum()):6d} "
         f"mae={masked_mae(err[idx], m[idx]):.4f}")
 
+def metrics(err, m, data):
+    a = np.abs(err[m])
+    return {
+        "samples": len(data),
+        "mae": masked_mae(err, m),
+        "rmse": float(np.sqrt(np.nanmean(err[m] ** 2))),
+        "p95": float(np.percentile(a, 95)),
+        "p99": float(np.percentile(a, 99)),
+        "max": float(np.nanmax(a)),
+        "pct_gt_0p5": 100 * float((a > 0.5).mean()),
+    }
+
+def row(v):
+    return (f"| {v['name']:26s} | {v['samples']:5d} | {v['mae']:.4f} | {v['rmse']:.4f} "
+            f"| {v['p95']:.3f} | {v['p99']:.3f} | {v['max']:.3f} | {v['pct_gt_0p5']:.3f}% |")
+
+def compare(pairs):
+    print("| Model                    | n     | MAE    | RMSE   | p95   | p99   | max   | % > 0.5 dB |")
+    print("| ------------------------ | ----- | ------ | ------ | ----- | ----- | ----- | ---------- |")
+    for name, path in pairs:
+        with open(path) as f:
+            data = json.load(f)
+        err, m = collect(data)
+        v = metrics(err, m, data)
+        v["name"] = name
+        print(row(v))
+
+def by_roadm_table(pairs):
+    roadms = sorted({r["roadm"] for r in json.load(open(pairs[0][1]))})
+    print(f"{'roadm':22s} " + " ".join(f"{name:>14s}" for name, _ in pairs))
+    print(f"{'':22s} " + " ".join(f"{'MAE / p99':>14s}" for _ in pairs))
+    for rm in roadms:
+        cells = []
+        for _, path in pairs:
+            with open(path) as f:
+                data = [r for r in json.load(f) if r["roadm"] == rm]
+            err, m = collect(data)
+            a = np.abs(err[m])
+            cells.append(f"{masked_mae(err, m):.4f}/{float(np.percentile(a, 99)):.3f}")
+        print(f"{rm:22s} " + " ".join(f"{c:>14s}" for c in cells))
+
 def main():
     ap = argparse.ArgumentParser(description="Masked error metrics for encoder predictions")
     ap.add_argument("path", nargs="?", default=str(PREDICTIONS_PATH))
+    ap.add_argument("--compare", default="", help="comma-separated name:path pairs; print cross-model markdown tables")
+    ap.add_argument("--roadm", action="store_true", help="with --compare, also print the per-roadm MAE/p99 table")
     args = ap.parse_args()
+    if args.compare:
+        pairs = [tuple(p.split(":", 1)) for p in args.compare.split(",")]
+        compare(pairs)
+        if args.roadm:
+            print()
+            by_roadm_table(pairs)
+        return
     with open(args.path) as f:
         data = json.load(f)
     err, m = collect(data)

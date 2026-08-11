@@ -7,8 +7,8 @@ from pathlib import Path
 PREDICTIONS_PATH = Path(__file__).parent / "saved_models" / "encoder" / "predictions" / "predictions.json"
 OUTPUT_PATH = Path(__file__).parent / "saved_models" / "encoder" / "predictions" / "graphs" 
 
-def load_data(roadm_filter=None, channel=None):
-    with open(PREDICTIONS_PATH) as f:
+def load_data(roadm_filter=None, channel=None, preds_path=None):
+    with open(preds_path or PREDICTIONS_PATH) as f:
         data = json.load(f)
 
     if roadm_filter and roadm_filter != "all":
@@ -315,12 +315,16 @@ def main():
         "-c", "--channel", type=int, default=None,
         help="Plot for a single channel (1-95). Omit for spectral plots."
     )
+    parser.add_argument(
+        "--path", default=None,
+        help="Predictions JSON to plot (default: saved_models/encoder/predictions/predictions.json)"
+    )
     parser.add_argument("--output-dir", default=str(OUTPUT_PATH))
     args = parser.parse_args()
 
     roadm_filter = args.roadm if args.roadm == "all" else [r.strip() for r in args.roadm.split(",")]
     
-    d = load_data(roadm_filter, channel=args.channel)
+    d = load_data(roadm_filter, channel=args.channel, preds_path=args.path)
 
     out = Path(args.output_dir) / f"ch{args.channel}" if args.channel else Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)

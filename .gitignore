@@ -10,6 +10,5 @@ dataset/preamp/27dB/random/venv/
 __pycache__/
 neural_nets/saved_models/
 neural_nets/saved_models_old/
-PLAN.md
 neuiral_nets/saved_models/encoder/predictions/graphs/
 tmp_encoder_test_model/model.keras
