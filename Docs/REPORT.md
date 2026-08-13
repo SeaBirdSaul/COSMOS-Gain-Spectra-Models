@@ -8,8 +8,8 @@ per-channel deployment spec is met.
 ## Summary
 
 - **Multi-topology + stratified retraining fixed the distribution-shift error.**
-  On the shifted topology2, masked MAE fell 0.0961 → 0.0777 dB and
-  `roadm_7_preamp` MAE fell 0.208 → 0.050 dB (p99 0.504 → 0.182).
+  On the shifted topology2 dataset, masked MAE fell from 0.0961 → 0.0777 dB, and
+  `roadm_7_preamp` MAE fell from 0.208 → 0.050 dB (p99: 0.504 → 0.182).
 - **No Phase 2 variant beats the plain Phase 1 retrain** by a meaningful margin
   (bestcombo 0.0778 vs encoder 0.0777); the gains came from data coverage, not
   loss/architecture tweaks.

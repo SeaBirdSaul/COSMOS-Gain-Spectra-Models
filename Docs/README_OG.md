@@ -35,9 +35,9 @@ COSMOS _Erbium-Doped Fiber Amplifier_ (_EDFA_) Dataset consists of the gain spec
 
 # Measurement pipeline
 ![Measurement pipeline!](./misc/md_support_materials/figures/measurement_setup.png)
-The figure shows the block diagram of the block diagram of the Lumentum ROADM-20 unit and the measurement setup of a device under test (DUT) EDFA. Each ROADM unit consists of one MUX wavelength selective switch (WSS), one DEMUX  WSS, one booster EDFA, and one pre-amplifier EDFA, and is equipped with total power and channel power monitoring capabilities using the built-in PDs and OCMs with a power measurement resolution of 0.01 dB and 0.1 dB, respectively.  We use a comb source to generate a set of 95×50 GHz WDM channels in the C-band.
+The figure shows the block diagram of the Lumentum ROADM-20 unit and the measurement setup of the device-under-test (DUT) EDFA. Each ROADM unit consists of one MUX wavelength-selective switch (WSS), one DEMUX WSS, one booster EDFA, and one pre-amplifier EDFA. It is equipped with total-power and channel-power monitoring capabilities using the built-in PDs and OCMs, with power measurement resolutions of 0.01 dB and 0.1 dB, respectively. We use a comb source to generate a set of 95 × 50 GHz WDM channels in the C-band.
 
-With a DUT booster EDF0A, the output of the comb source is connected to an add port of the MUX WSS, which applies the channel loading configuration, adjusts the power level in each loaded channel, and generates a flat input power spectrum at the DUT EDFA. With a DUT pre-amplifier EDFA, the output of the comb source is first connected to the pre-amplifier EDFA and DEMUX WSS of the auxiliary ROADM, whose DEMUX WSS applies the channel loading configuration, adjusts the power level in each loaded channel, and generates a flat output power spectrum that is transmitted to the input of the DUT pre-amplifier EDFA. The output of the DUT EDFA is terminated.
+With a DUT booster EDFA, the output of the comb source is connected to an add port of the MUX WSS. The MUX WSS applies the channel loading configuration, adjusts the power level of each loaded channel, and generates a flat input power spectrum at the DUT EDFA. With a DUT pre-amplifier EDFA, the output of the comb source is first connected to the pre-amplifier EDFA and the DEMUX WSS of the auxiliary ROADM. The DEMUX WSS applies the channel loading configuration, adjusts the power level of each loaded channel, and generates a flat output power spectrum that is transmitted to the input of the DUT pre-amplifier EDFA. The output of the DUT EDFA is then terminated.
 
 The wavelength dependent gain spectrum of each EDFA, denoted by $g(\lambda_i)$, can be characterized by its input power spectrum, $S_{\textrm{in}}(\lambda_i)$, and output power spectrum, $S_{\textrm{out}}(\lambda_i)$, i.e., $g(\lambda_i) = S_{\textrm{out}}(\lambda_i)-S_{\textrm{in}}(\lambda_i), \forall i = 1,2,\dots,95$, where $\lambda_1 = 1529.16$ nm (196.050 THz) and $\lambda_{95} = 1566.72$ nm (191.350 THz).
 
@@ -55,7 +55,7 @@ For each EDFA, $g(\lambda_i)$ can vary significantly with different channel load
 
 # Dataset Folder Structure
 
-The whole dataset folder structure is shown as following:
+The whole dataset folder structure is shown below:
 
 ```
 📦COSMOS-EDFA-Dataset 
@@ -218,7 +218,7 @@ We put some of the important keys in the diagram:
 		- `goalpost_channel_balanced_freq_medium_high`: take several adjacent channels in medium and high frequency band. The # of the adjacent channels in two bands are equal (balanced). 
 		- `goalpost_channel_unbalanced_freq_low_medium`: take several adjacent channels in low and medium frequency band. The # of the adjacent channels in two bands are *NOT* equal (unbalanced). 
 		- `goalpost_channel_unbalanced_freq_low_high`: take several adjacent channels in low and high frequency band. The # of the adjacent channels in two bands are *NOT* equal (unbalanced). 
-		- `goalpost_channel_unbalanced_freq_medium_high`: take several adjacent channels in medium and high frequency band. The # of the adjacent channels in two bands are *NOT* equal (unbalanced). 
+		- `goalpost_channel_unbalanced_freq_medium_high`: take several adjacent channels in the medium and high frequency bands. The number of adjacent channels in the two bands is *not* equal (unbalanced).
 	- extraLow channel loading
 		- `single_channel`: all single channel 
 		- `double_channel`: all double adjacent channel pairs
@@ -297,20 +297,19 @@ We provide some example python codes to help users to better understand the data
 `pip install numpy pandas matplotlib scipy pprint`
 
 ### Example codes
-The example code can be found at `./code/examples.py`. It supports three different uses of the collected data. 
+The example code can be found at `./code/examples.py`. It supports three different uses of the collected data.
 
- 1. Plot arbitrary gain spectrum for one json file
--- Function explanation: plot the gain spectrum of any json file
--- How to run the code: `run_examples(option=1)` with parameters selected in the codes.
+1. Plot an arbitrary gain spectrum for one JSON file
+   - Function explanation: plot the gain spectrum of any JSON file
+   - How to run the code: `run_examples(option=1)` with parameters selected in the code
 
-    
-2. Print/plot arbitrary Json data 
--- Function explanation: plot any spectrum collected from any json file.  
--- How to run the code: `run_examples(option=2)` with parameters selected in the codes. Specifically, `subChannelName` can be arbitrary value found from [`open_channel_type`](#other-keys-in-booster-json-file) and `spectrumName` can be arbitrary [*spectrum*](#measurement_data)
+2. Print/plot arbitrary JSON data
+   - Function explanation: plot any spectrum collected from any JSON file
+   - How to run the code: `run_examples(option=2)` with parameters selected in the code. Specifically, `subChannelName` can be any value found in [`open_channel_type`](#other-keys-in-booster-json-file), and `spectrumName` can be any [*spectrum*](#measurement_data)
 
- 3. Convert Json raw data to ML readable data file
--- Function explanation: convert selected json files into training/testing/augment dataset in *CSV* format. It consists of the EDFA gain setting, total input/output power, input power spectrum,  channel loading configuration, and the EDFA gain spectrum. 
--- How to run the code: `run_examples(option=3)` with parameters selected in the codes.
+3. Convert raw JSON data to an ML-readable data file
+   - Function explanation: convert selected JSON files into a training/testing/augmentation dataset in *CSV* format. It consists of the EDFA gain setting, total input/output power, input power spectrum, channel loading configuration, and EDFA gain spectrum.
+   - How to run the code: `run_examples(option=3)` with parameters selected in the code
 
 ### Related Parameters
 **edfaTypes**: booster or pre-amplifier EDFA

@@ -1,6 +1,6 @@
 # ignore ALL files in ANY directory named temp
 internal/
-venv/
+.venv
 __pycache__/
 .vscode/
 neural_nets/saved_models/

@@ -332,7 +332,7 @@ def main():
     plots = [
         ("encoder_01_predicted_vs_true_gain.png", plot_predicted_vs_true_gain),
         ("encoder_02_error_heatmap.png", plot_error_heatmap),
-        ("encoder_03_error_distrinutiom_by_type.png", plot_error_distribution),
+        ("encoder_03_error_distribution_by_type.png", plot_error_distribution),
         ("encoder_04_predicted_vs_true_scatter.png", plot_scatter),
         ("encoder_05_ripple_comparison.png", plot_ripple_comparison),
         ("encoder_06_error_vs_input_power.png", plot_error_vs_power),

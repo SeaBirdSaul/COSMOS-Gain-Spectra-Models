@@ -17,10 +17,10 @@ Use the project venv python: `PY=/home/murphe83/Repos/COSMOS-EDFA-Dataset/venv/b
   active-channel mean gain). Loss = masked MAE over active channels + inactive penalty
   (weight 0.1). `StandardScaler` on features only; target is unscaled ripple.
 - **The model was trained on `dataset/multispan/multispan_topology1.json` only**
-  (11,832 samples = 9,465 train + 2,367 test, `train_test_split(test_size=0.2,
+  (11,832 samples = 9,465 train + 2,367 test; `train_test_split(test_size=0.2,
 random_state=42)`).
 - The original saved predictions (`predictions.json`) were generated on
-  `multispan_topology2.json` and contain ALL 11,832 records (train + test mixed) —
+  `multispan_topology2.json` and contain all 11,832 records (train + test mixed) —
   not a clean test metric.
 - **Key cause of the large errors: train/eval distribution shift.**
   - `roadm_7_preamp` in topology2 operates at pin_total −38…−29 dBm (mean −32),

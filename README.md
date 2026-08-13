@@ -1,6 +1,6 @@
 # COSMOS-EDFA Dataset and Neural Net Prediction Pipeline
 
-This repository contains the data, model code, and reporting workflow used to predict EDFA gain spectra and ripple across multispan optical topologies. The project is organized around the measurement dataset in [dataset/multispan](dataset/multispan), the model implementations in [neural_nets](neural_nets), and the evaluation docs in [PLAN.md](PLAN.md) and [REPORT.md](REPORT.md).
+This repository contains the data, model code, and reporting workflow used to predict EDFA gain spectra and ripple across multispan optical topologies. The project is organized around the measurement dataset in [dataset/multispan](dataset/multispan), the model implementations in [neural_nets](neural_nets), and the evaluation docs in [Docs/PLAN.md](Docs/PLAN.md) and [Docs/REPORT.md](Docs/REPORT.md).
 
 The goal is to estimate the per-channel gain response of an optical system from measured input conditions and compare those predictions against the true measured gain spectrum. This is useful for understanding model drift, stage-specific behavior, edge-channel failures, and deployment suitability under real-world operating conditions.
 
@@ -21,10 +21,10 @@ Supporting tooling:
 
 Documentation:
 
-- [PLAN.md](PLAN.md): experiment plan and diagnosis trail
-- [REPORT.md](REPORT.md): summary of evaluated models and performance
-- [neural_nets/USAGE.md](neural_nets/USAGE.md): command examples for training, prediction, and metrics
-- [neural_nets/PLOT_GUIDE.md](neural_nets/PLOT_GUIDE.md): plot interpretation guide
+- [Docs/PLAN.md](Docs/PLAN.md): experiment plan and diagnosis trail
+- [Docs/REPORT.md](Docs/REPORT.md): summary of evaluated models and performance
+- [Docs/USAGE.md](Docs/USAGE.md): command examples for training, prediction, and metrics
+- [Docs/PLOT_GUIDE.md](Docs/PLOT_GUIDE.md): plot interpretation guide
 
 ---
 
@@ -40,7 +40,9 @@ It is mainly useful for:
 - single-stage spectra prediction
 - basic baseline comparison before moving to multispan settings
 
-The generated outputs live under the single-span saved model directory, typically under [neural_nets/saved_models](neural_nets/saved_models).
+The generated outputs live under the single-span saved model directory, typically under:
+
+- [neural_nets/saved_models](neural_nets/saved_models).
 
 ### 2) Legacy multispan model: [neural_nets/multispan_net.py](neural_nets/multispan_net.py)
 
@@ -55,7 +57,6 @@ This model is useful when you want to:
 The older plotting scripts for this workflow are:
 
 - [neural_nets/multispan_plots.py](neural_nets/multispan_plots.py)
-- [neural_nets/plots.py](neural_nets/plots.py)
 
 ### 3) Current main model: [neural_nets/encoder_net.py](neural_nets/encoder_net.py)
 
@@ -71,7 +72,7 @@ It includes several practical training options such as:
 - `--scale-target`: scales the output target for training
 - `--ripple`: trains on ripple around the active-channel mean rather than raw gain
 
-This is the workflow behind the current report in [REPORT.md](REPORT.md).
+This is the workflow behind the current report in [Docs/REPORT.md](Docs/REPORT.md).
 
 Important saved-output locations:
 
@@ -147,7 +148,7 @@ There are two families of plotting code in this repo:
 - legacy plotting scripts for older models: [neural_nets/plots.py](neural_nets/plots.py) and [neural_nets/multispan_plots.py](neural_nets/multispan_plots.py)
 - current plotting script for the encoder model: [neural_nets/encoder_plots_v2.py](neural_nets/encoder_plots_v2.py)
 
-The current production workflow uses the encoder plots. The multispan and singlespan plot scripts are still useful as legacy reference tools, especially when working with older saved model outputs or comparing against the original model family. But for the active encoder workflow described in [REPORT.md](REPORT.md), [neural_nets/encoder_plots_v2.py](neural_nets/encoder_plots_v2.py) is the one to use.
+The current production workflow uses the encoder plots. The multispan and singlespan plot scripts are still useful as legacy reference tools, especially when working with older saved model outputs or comparing against the original model family. But for the active encoder workflow described in [Docs/REPORT.md](Docs/REPORT.md), [neural_nets/encoder_plots_v2.py](neural_nets/encoder_plots_v2.py) is the one to use.
 
 ---
 
@@ -160,8 +161,7 @@ Use a local virtual environment so the dependency versions stay isolated.
 From anywhere on the machine, replace the path with your local checkout:
 
 ```bash
-REPO=/path/to/COSMOS-EDFA-Dataset
-cd "$REPO"
+cd /path/to/COSMOS-EDFA-Dataset
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -176,7 +176,7 @@ python -m pip install numpy pandas matplotlib scikit-learn tensorflow
 If the environment already exists, just activate it:
 
 ```bash
-cd "$REPO"
+cd /path/to/COSMOS-EDFA-Dataset
 source .venv/bin/activate
 ```
 
@@ -270,13 +270,13 @@ The project cares about more than a single average error number. The key metrics
 
 This is especially important because edge channels and low-power samples can dominate the worst-case tail even when the average error looks acceptable.
 
-The report in [REPORT.md](REPORT.md) is the clearest summary of the project’s final evaluation and should be used as the main reference when comparing model variants.
+The report in [Docs/REPORT.md](Docs/REPORT.md) is the clearest summary of the project’s final evaluation and should be used as the main reference when comparing model variants.
 
 ---
 
 ## Sample report excerpt
 
-Below is a brief sample from [REPORT.md](REPORT.md):
+Below is a brief sample from [Docs/REPORT.md](Docs/REPORT.md):
 
 ```text
 ### Topology 2 (distribution shift — the deployment-relevant case)
@@ -300,10 +300,10 @@ This shows the main pattern: the model is usually strong on average, but a small
 
 ## Supporting docs
 
-- [PLAN.md](PLAN.md)
-- [REPORT.md](REPORT.md)
-- [neural_nets/USAGE.md](neural_nets/USAGE.md)
-- [neural_nets/PLOT_GUIDE.md](neural_nets/PLOT_GUIDE.md)
+- [Docs/PLAN.md](Docs/PLAN.md)
+- [Docs/REPORT.md](Docs/REPORT.md)
+- [Docs/USAGE.md](Docs/USAGE.md)
+- [Docs/PLOT_GUIDE.md](Docs/PLOT_GUIDE.md)
 - [dataset/multispan](dataset/multispan)
 
-For the exact command-level workflow and best-practice usage, read [neural_nets/USAGE.md](neural_nets/USAGE.md) and [neural_nets/PLOT_GUIDE.md](neural_nets/PLOT_GUIDE.md).
+For the exact command-level workflow and best-practice usage, read [Docs/USAGE.md](Docs/USAGE.md) and [Docs/PLOT_GUIDE.md](Docs/PLOT_GUIDE.md).

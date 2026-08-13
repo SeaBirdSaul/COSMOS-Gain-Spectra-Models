@@ -8,8 +8,8 @@ PY=/home/murphe83/Repos/COSMOS-EDFA-Dataset/venv/bin/python
 ```
 
 This covers the Phase 1 (multi-topology retrain), Phase 2 (model/loss variants),
-and Phase 3 (report tooling) additions. Related docs: `PLAN.md` (plan + verified
-results), `REPORT.md` (Phase 3 report), `PLOT_GUIDE.md` (what each plot shows).
+and Phase 3 (report tooling) additions. Related docs: `PLAN.md` (plan and verified
+results), `REPORT.md` (Phase 3 report), and `PLOT_GUIDE.md` (what each plot shows).
 
 ---
 
